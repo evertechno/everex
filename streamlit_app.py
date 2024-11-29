@@ -1,40 +1,37 @@
-import streamlit as st
+import os
 import requests
 import httpx
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
-import os
+import json
 import zipfile
+from urllib.parse import urljoin, urlparse
+from bs4 import BeautifulSoup
+import streamlit as st
 import google.generativeai as genai
 
 # Configure Google Gemini AI
 genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
 # Function to fetch website content
-def fetch_content(url, dynamic=False):
+def fetch_content(url, dynamic=False, timeout=10):
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         if dynamic:
             rendering_service = "https://render-tron.appspot.com/render"
-            response = httpx.get(f"{rendering_service}/{url}", timeout=30)
-            response.raise_for_status()  # Will raise an error if the response is not 200
+            response = httpx.get(f"{rendering_service}/{url}", timeout=timeout)
+            response.raise_for_status()
             return response.text
         else:
-            response = requests.get(url, headers=headers, timeout=30)
-            response.raise_for_status()  # Will raise an error if the response is not 200
+            response = requests.get(url, headers=headers, timeout=timeout)
+            response.raise_for_status()
             return response.text
-    except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"HTTP Error: {e.response.status_code} while fetching {url}")
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"Request Error: {e} while fetching {url}")
+    except requests.exceptions.Timeout:
+        raise RuntimeError("Request timed out while fetching content.")
     except Exception as e:
-        st.error(f"Failed to fetch content from {url}: {e}")
         raise RuntimeError(f"Failed to fetch content: {e}")
 
 # Function to analyze content with AI
 def analyze_content_with_ai(content):
     try:
-        # Summarize content
         model = genai.GenerativeModel("gemini-1.5-flash")
         summary = model.generate_content(f"Summarize the following content: {content[:4000]}")
         return summary.text
@@ -51,10 +48,10 @@ def extract_seo_metadata(soup):
     return metadata
 
 # Function to clone a website
-def clone_website(url, output_dir, dynamic=False):
+def clone_website(url, output_dir, dynamic=False, timeout=10):
     os.makedirs(output_dir, exist_ok=True)
     try:
-        html_content = fetch_content(url, dynamic=dynamic)
+        html_content = fetch_content(url, dynamic=dynamic, timeout=timeout)
         soup = BeautifulSoup(html_content, "html.parser")
 
         # Save the HTML file
@@ -63,7 +60,7 @@ def clone_website(url, output_dir, dynamic=False):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(soup.prettify())
 
-        # Extract resources
+        # Extract resources (CSS, JS, images)
         download_resources(soup, output_dir, url)
 
         # Analyze content with AI
@@ -72,12 +69,13 @@ def clone_website(url, output_dir, dynamic=False):
         # Extract SEO metadata
         seo_metadata = extract_seo_metadata(soup)
 
-        return {"summary": summary, "seo_metadata": seo_metadata, "path": output_dir}
+        return {"summary": summary, "seo_metadata": seo_metadata, "path": output_dir, "html_content": html_content}
     except Exception as e:
         return {"error": str(e)}
 
-# Function to download resources
+# Function to download resources (CSS, JS, images)
 def download_resources(soup, output_dir, base_url):
+    # Limit resource downloads to essential files only
     for css in soup.find_all("link", rel="stylesheet"):
         href = css.get("href")
         if href:
@@ -95,17 +93,19 @@ def download_resources(soup, output_dir, base_url):
 
 def download_file(file_url, output_dir):
     try:
-        response = requests.get(file_url, stream=True, headers={"User-Agent": "Mozilla/5.0"})
+        response = requests.get(file_url, stream=True, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         response.raise_for_status()
         file_name = os.path.basename(urlparse(file_url).path)
         file_path = os.path.join(output_dir, file_name)
         with open(file_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
+    except requests.exceptions.Timeout:
+        st.warning(f"Download timed out for {file_url}")
     except Exception as e:
         st.warning(f"Failed to download {file_url}: {e}")
 
-# Function to compress the cloned website
+# Function to compress the cloned website into a ZIP file
 def compress_website(output_dir, zip_file_path):
     try:
         with zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -118,6 +118,43 @@ def compress_website(output_dir, zip_file_path):
     except Exception as e:
         return None
 
+# Function to export content in different formats
+def export_content(content, export_format, output_dir):
+    if export_format == "HTML":
+        with open(os.path.join(output_dir, "cloned_website.html"), "w", encoding="utf-8") as f:
+            f.write(content["html_content"])
+        return "cloned_website.html"
+
+    elif export_format == "JSON":
+        json_data = json.dumps(content, indent=4)
+        with open(os.path.join(output_dir, "cloned_website.json"), "w", encoding="utf-8") as f:
+            f.write(json_data)
+        return "cloned_website.json"
+
+    elif export_format == "Python":
+        python_code = f'''
+import requests
+
+url = "{content["url"]}"
+
+response = requests.get(url)
+print(response.text)
+'''
+        with open(os.path.join(output_dir, "cloned_website.py"), "w", encoding="utf-8") as f:
+            f.write(python_code)
+        return "cloned_website.py"
+
+    elif export_format == "JavaScript":
+        js_code = f'''
+fetch("{content["url"]}")
+    .then(response => response.text())
+    .then(data => console.log(data))
+    .catch(error => console.error("Error:", error));
+'''
+        with open(os.path.join(output_dir, "cloned_website.js"), "w", encoding="utf-8") as f:
+            f.write(js_code)
+        return "cloned_website.js"
+
 # Streamlit App
 st.title("AI-Enhanced Website Cloner & Analyzer")
 st.sidebar.header("Settings")
@@ -125,6 +162,7 @@ website_url = st.text_input("Enter the website URL:", "https://example.com")
 output_folder = st.text_input("Enter output folder path:", "./cloned_website")
 dynamic_rendering = st.checkbox("Enable Dynamic Rendering")
 compress = st.checkbox("Compress Cloned Website into ZIP")
+export_format = st.selectbox("Choose export format:", ["HTML", "JSON", "Python", "JavaScript"])
 
 if st.button("Start Cloning"):
     with st.spinner("Cloning and analyzing in progress..."):
@@ -137,6 +175,11 @@ if st.button("Start Cloning"):
             st.write(result["summary"])
             st.write("### SEO Metadata:")
             st.json(result["seo_metadata"])
+            
+            # Export the content in the selected format
+            file_name = export_content(result, export_format, output_folder)
+            st.success(f"Content exported as {file_name}")
+            
             if compress:
                 zip_file = os.path.join(output_folder, "cloned_website.zip")
                 zip_path = compress_website(output_folder, zip_file)
