@@ -17,13 +17,18 @@ def fetch_content(url, dynamic=False):
         if dynamic:
             rendering_service = "https://render-tron.appspot.com/render"
             response = httpx.get(f"{rendering_service}/{url}", timeout=30)
-            response.raise_for_status()
+            response.raise_for_status()  # Will raise an error if the response is not 200
             return response.text
         else:
             response = requests.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
+            response.raise_for_status()  # Will raise an error if the response is not 200
             return response.text
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(f"HTTP Error: {e.response.status_code} while fetching {url}")
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Request Error: {e} while fetching {url}")
     except Exception as e:
+        st.error(f"Failed to fetch content from {url}: {e}")
         raise RuntimeError(f"Failed to fetch content: {e}")
 
 # Function to analyze content with AI
