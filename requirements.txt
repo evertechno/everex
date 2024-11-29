@@ -1,5 +1,5 @@
 streamlit
-request
+requests
 beautifulsoup4
 httpx
 google.generativeai
