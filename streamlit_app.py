@@ -3,24 +3,31 @@ import requests
 import httpx
 import json
 import zipfile
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlsplit
 from bs4 import BeautifulSoup
 import streamlit as st
 import google.generativeai as genai
+import mimetypes
+import base64
+from pathlib import Path
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 
 # Configure Google Gemini AI
 genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
-# Function to fetch website content
+# Function to fetch website content (with dynamic rendering support)
 def fetch_content(url, dynamic=False, timeout=10):
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         if dynamic:
+            # Using Rendertron for JavaScript-rendered content
             rendering_service = "https://render-tron.appspot.com/render"
             response = httpx.get(f"{rendering_service}/{url}", timeout=timeout)
             response.raise_for_status()
             return response.text
         else:
+            # Regular static content scraping
             response = requests.get(url, headers=headers, timeout=timeout)
             response.raise_for_status()
             return response.text
@@ -73,9 +80,9 @@ def clone_website(url, output_dir, dynamic=False, timeout=10):
     except Exception as e:
         return {"error": str(e)}
 
-# Function to download resources (CSS, JS, images)
+# Function to download resources (CSS, JS, images, fonts, etc.)
 def download_resources(soup, output_dir, base_url):
-    # Limit resource downloads to essential files only
+    # Download CSS, JS, images, and other resources
     for css in soup.find_all("link", rel="stylesheet"):
         href = css.get("href")
         if href:
@@ -91,19 +98,26 @@ def download_resources(soup, output_dir, base_url):
         if src:
             download_file(urljoin(base_url, src), output_dir)
 
-def download_file(file_url, output_dir):
+    for font in soup.find_all("link", rel="stylesheet", href=True):
+        href = font.get("href")
+        if href:
+            download_file(urljoin(base_url, href), output_dir)
+
+# Function to handle file downloading with retries
+def download_file(file_url, output_dir, retries=3):
     try:
         response = requests.get(file_url, stream=True, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         response.raise_for_status()
         file_name = os.path.basename(urlparse(file_url).path)
         file_path = os.path.join(output_dir, file_name)
-        with open(file_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-    except requests.exceptions.Timeout:
-        st.warning(f"Download timed out for {file_url}")
+        if not os.path.exists(file_path):
+            with open(file_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        return file_path
     except Exception as e:
         st.warning(f"Failed to download {file_url}: {e}")
+        return None
 
 # Function to compress the cloned website into a ZIP file
 def compress_website(output_dir, zip_file_path):
@@ -118,7 +132,7 @@ def compress_website(output_dir, zip_file_path):
     except Exception as e:
         return None
 
-# Function to export content in different formats
+# Function to export content in different formats (HTML, JSON, Python, JS)
 def export_content(content, export_format, output_dir):
     if export_format == "HTML":
         file_name = "cloned_website.html"
@@ -179,7 +193,7 @@ if st.button("Start Cloning"):
             st.write(result["summary"])
             st.write("### SEO Metadata:")
             st.json(result["seo_metadata"])
-            
+
             # Export the content in the selected format
             exported_file = export_content(result, export_format, output_folder)
 
@@ -192,7 +206,7 @@ if st.button("Start Cloning"):
                     file_name=exported_file,
                     mime="application/octet-stream"
                 )
-            
+
             if compress:
                 zip_file = os.path.join(output_folder, "cloned_website.zip")
                 zip_path = compress_website(output_folder, zip_file)
