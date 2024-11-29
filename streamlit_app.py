@@ -121,15 +121,17 @@ def compress_website(output_dir, zip_file_path):
 # Function to export content in different formats
 def export_content(content, export_format, output_dir):
     if export_format == "HTML":
-        with open(os.path.join(output_dir, "cloned_website.html"), "w", encoding="utf-8") as f:
+        file_name = "cloned_website.html"
+        with open(os.path.join(output_dir, file_name), "w", encoding="utf-8") as f:
             f.write(content["html_content"])
-        return "cloned_website.html"
+        return file_name
 
     elif export_format == "JSON":
         json_data = json.dumps(content, indent=4)
-        with open(os.path.join(output_dir, "cloned_website.json"), "w", encoding="utf-8") as f:
+        file_name = "cloned_website.json"
+        with open(os.path.join(output_dir, file_name), "w", encoding="utf-8") as f:
             f.write(json_data)
-        return "cloned_website.json"
+        return file_name
 
     elif export_format == "Python":
         python_code = f'''
@@ -140,9 +142,10 @@ url = "{content["url"]}"
 response = requests.get(url)
 print(response.text)
 '''
-        with open(os.path.join(output_dir, "cloned_website.py"), "w", encoding="utf-8") as f:
+        file_name = "cloned_website.py"
+        with open(os.path.join(output_dir, file_name), "w", encoding="utf-8") as f:
             f.write(python_code)
-        return "cloned_website.py"
+        return file_name
 
     elif export_format == "JavaScript":
         js_code = f'''
@@ -151,9 +154,10 @@ fetch("{content["url"]}")
     .then(data => console.log(data))
     .catch(error => console.error("Error:", error));
 '''
-        with open(os.path.join(output_dir, "cloned_website.js"), "w", encoding="utf-8") as f:
+        file_name = "cloned_website.js"
+        with open(os.path.join(output_dir, file_name), "w", encoding="utf-8") as f:
             f.write(js_code)
-        return "cloned_website.js"
+        return file_name
 
 # Streamlit App
 st.title("AI-Enhanced Website Cloner & Analyzer")
@@ -177,15 +181,25 @@ if st.button("Start Cloning"):
             st.json(result["seo_metadata"])
             
             # Export the content in the selected format
-            file_name = export_content(result, export_format, output_folder)
-            st.success(f"Content exported as {file_name}")
+            exported_file = export_content(result, export_format, output_folder)
+
+            # Provide a download button for the exported file
+            export_file_path = os.path.join(output_folder, exported_file)
+            with open(export_file_path, "rb") as file:
+                st.download_button(
+                    label=f"Download {export_format} File",
+                    data=file,
+                    file_name=exported_file,
+                    mime="application/octet-stream"
+                )
             
             if compress:
                 zip_file = os.path.join(output_folder, "cloned_website.zip")
                 zip_path = compress_website(output_folder, zip_file)
                 if zip_path:
                     st.success(f"Cloned website compressed successfully at: {zip_path}")
-                    st.download_button("Download ZIP", data=open(zip_path, "rb"), file_name="cloned_website.zip")
+                    with open(zip_path, "rb") as zip_file:
+                        st.download_button("Download ZIP", data=zip_file, file_name="cloned_website.zip")
 
 # Prompt-based AI Interaction
 st.sidebar.subheader("AI Content Assistant")
