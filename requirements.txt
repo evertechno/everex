@@ -1,1 +1,5 @@
 streamlit
+request
+beautifulsoup4
+httpx
+google.generativeai
